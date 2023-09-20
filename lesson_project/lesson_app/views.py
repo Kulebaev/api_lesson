@@ -1,104 +1,56 @@
 from django.shortcuts import render
 from rest_framework.permissions import IsAuthenticated
 from django.db import models
-from django.db.models import Count
 from rest_framework.response import Response
 from .models import Product, Lesson, ProductAccess, LessonView
 from .serializers import ProductSerializer, LessonSerializer, ProductAccessSerializer, LessonViewSerializer
 from rest_framework import generics
 
 
-class ProductLessonListView(generics.ListAPIView):
-    serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        # Получить идентификатор продукта из параметров запроса
-        product_id = self.kwargs.get('product_id')
-
-        product_object = Product.objects.get(id=product_id)
-
-        # Получить текущего пользователя
-        user = self.request.user
-
-        # Проверить, имеет ли пользователь доступ к этому продукту
-        has_access = ProductAccess.objects.filter(user=user, product_id=product_object)
-
-        # return has_access
-
-        if not has_access.exists():
-            # Если у пользователя нет доступа к продукту, вернуть пустой список
-            return Lesson.objects.none()
-
-        # Фильтровать уроки, связанные с данным продуктом
-        queryset = Lesson.objects.filter(products=product_id)
-
-        return queryset
-
-    def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-
-        lesson_list = []
-
-        for q in queryset:
-
-            lesson_info = {
-                'lesson_id': q.name,
-                
-            }
-
-            lesson_list.append(lesson_info)
-
-        return Response(lesson_list)
-
-
 class UserLessonListView(generics.ListAPIView):
-    serializer_class = LessonSerializer
+    serializer_class = LessonViewSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         # текущий пользователь
         user = self.request.user
 
-        # Получить текущего пользователя
-        user = self.request.user
+        product_access = ProductAccess.objects.filter(user=user).values('product')
 
-        # Проверить, имеет ли пользователь доступ к этому продукту
-        product_ids_with_access = ProductAccess.objects.filter(user=user)
+        lesson = Lesson.objects.filter(products__in=product_access)
 
-        # return product_ids_with_access
-
-        if not product_ids_with_access:
-            # Если у пользователя нет доступа ни к одному продукту, вернуть пустой список
-            return Lesson.objects.none()
-
-        # Фильтровать уроки, связанные с продуктами, к которым у пользователя есть доступ
-        queryset = Lesson.objects.filter(products__id__in=product_ids_with_access) \
-                    .values('id') \
-                    .annotate(lesson_count=Count('id'))
-
-        return queryset
-
+        return LessonView.objects.filter(lesson__in=lesson).select_related("lesson")
 
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        count = queryset.count()  # Получить количество элементов в queryset
+        queryset = self.filter_queryset(self.get_queryset())
 
-        lesson_ids = queryset.values_list('id', flat=True)
-
-        lesson_views = LessonView.objects.filter(lesson__id__in=lesson_ids)
-
-        # return Response({'count': count, 'list': list(lesson_views)})
+        unique_lessons = queryset.values('lesson').distinct()
 
         # Список уроков
         lesson_list = []
-        for lesson_data in lesson_views:
-            lesson_name = lesson_data.first()
-            viewing_time_seconds = lesson_data.viewing_time_seconds
+        for lesson_data in unique_lessons:
+            lesson_id = lesson_data['lesson']
+            lesson_views = queryset.filter(lesson=lesson_id)
+            total_duration_seconds = lesson_views.first().lesson.duration_seconds
+            
+            lesson_view = lesson_views.first()
+    
+            # Проверяем, что lesson_view не равен None
+            if lesson_view:
+                total_viewing_time = lesson_view.viewing_time_seconds
+            else:
+                total_viewing_time = 0  # Устанавливаем значение по умолчанию, если lesson_view равен None
+
+            # Рассчитать процент
+            if total_duration_seconds > 0:
+                viewing_percentage = (total_viewing_time / total_duration_seconds) * 100
+            else:
+                viewing_percentage = 0
 
             lesson_info = {
-                'lesson_name': lesson_name.name,
-                'viewing_time_seconds': viewing_time_seconds,
+                'lesson_id': lesson_id,
+                'lesson_name': lesson_view.lesson.name,
+                'status': 'Просмотрено' if viewing_percentage >= 80 else 'Не просмотрено'
     }
 
             lesson_list.append(lesson_info)
