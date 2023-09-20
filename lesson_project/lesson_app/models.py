@@ -20,5 +20,5 @@ class LessonView(models.Model):
     lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE)
     viewed = models.BooleanField(default=False)
     viewing_time_seconds = models.IntegerField(default=0)
-    timestamp = models.DateTimeField(auto_now=True)
+    timestamp = models.DateTimeField(default=None)
 

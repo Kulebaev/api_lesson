@@ -1,74 +1,122 @@
 from django.shortcuts import render
 from rest_framework.permissions import IsAuthenticated
-from django.db import models
+from django.db.models import Case, When, Value, BooleanField, IntegerField, DateField, F
 from rest_framework.response import Response
 from .models import Product, Lesson, ProductAccess, LessonView
 from .serializers import ProductSerializer, LessonSerializer, ProductAccessSerializer, LessonViewSerializer
 from rest_framework import generics
+from datetime import datetime
 
 
 class UserLessonListView(generics.ListAPIView):
-    serializer_class = LessonViewSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes=[IsAuthenticated]
 
     def get_queryset(self):
         # текущий пользователь
-        user = self.request.user
+        user=self.request.user
 
-        product_access = ProductAccess.objects.filter(user=user).values('product')
+        product_access=ProductAccess.objects.filter(user=user).values('product')
+        
+        lesson_with_view=Lesson.objects.filter(
+            products__in=product_access).annotate(
+                viewed=Case(
+                    When(lessonview__user=user, then=F('lessonview__viewed')), default=Value(0), output_field=BooleanField()),
+                total_viewing_time=Case(
+                    When(lessonview__user=user, then=F('lessonview__viewing_time_seconds')), default=Value(0), output_field=IntegerField()
+                )
+            )
 
-        lesson = Lesson.objects.filter(products__in=product_access)
+        return lesson_with_view
 
-        return LessonView.objects.filter(lesson__in=lesson).select_related("lesson")
 
     def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset=self.filter_queryset(self.get_queryset())
 
-        unique_lessons = queryset.values('lesson').distinct()
-
+        unique_lessons=queryset.distinct() # Только уникальные поля
+    
         # Список уроков
         lesson_list = []
         for lesson_data in unique_lessons:
-            lesson_id = lesson_data['lesson']
-            lesson_views = queryset.filter(lesson=lesson_id)
-            total_duration_seconds = lesson_views.first().lesson.duration_seconds
-            
-            lesson_view = lesson_views.first()
-    
-            # Проверяем, что lesson_view не равен None
-            if lesson_view:
-                total_viewing_time = lesson_view.viewing_time_seconds
-            else:
-                total_viewing_time = 0  # Устанавливаем значение по умолчанию, если lesson_view равен None
 
             # Рассчитать процент
-            if total_duration_seconds > 0:
-                viewing_percentage = (total_viewing_time / total_duration_seconds) * 100
+            if lesson_data.duration_seconds > 0:
+                viewing_percentage = (lesson_data.total_viewing_time / lesson_data.duration_seconds) * 100
             else:
                 viewing_percentage = 0
 
-            lesson_info = {
-                'lesson_id': lesson_id,
-                'lesson_name': lesson_view.lesson.name,
-                'status': 'Просмотрено' if viewing_percentage >= 80 else 'Не просмотрено'
-    }
-
+            lesson_info = {'lesson_name': lesson_data.name,
+                        'status': 'Просмотрено' if viewing_percentage >= 80 else 'Не просмотрено',
+                        'viewing_time': lesson_data.total_viewing_time,
+                    }
+            
             lesson_list.append(lesson_info)
 
         return Response(lesson_list)  # данные в формате json
 
 
+class ProductLessonListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Получить идентификатор продукта из параметров запроса (предположим, что он передается как product_id)
+        product_id=self.kwargs.get('product_id')
+        product_object=Product.objects.filter(id=product_id)
+        # Получить текущего пользователя
+        user = self.request.user
+
+        # Фильтровать уроки, связанные с данным продуктом и пользователем
+        lesson_with_view=Lesson.objects.filter(
+            products__in=product_object).annotate(
+                timestamp=Case(
+                    When(lessonview__user=user, 
+                         then=F('lessonview__timestamp')), default=None),
+                total_viewing_time=Case(
+                    When(lessonview__user=user, 
+                         then=F('lessonview__viewing_time_seconds')), default=Value(0), output_field=IntegerField()
+                )
+            )
+
+        return lesson_with_view
+    
+
+    def list(self, request, *args, **kwargs):
+        queryset=self.filter_queryset(self.get_queryset())
+
+        unique_lessons=queryset.distinct() # Только уникальные поля
+        
+        product_list=[]
+
+        for lesson in unique_lessons:
+
+            # Проверить, был ли просмотр и получить дату последнего просмотра
+            last_viewed_date = None
+            
+            if lesson.timestamp is not None:
+                last_viewed_date = lesson.timestamp.strftime("%Y-%m-%d")
+
+
+            product_info = {
+                'lesson_name': lesson.name,
+                'viewing_time': lesson.total_viewing_time,
+                'last_viewed_date': last_viewed_date
+            }
+
+            product_list.append(product_info)
+
+        return Response(product_list)
+
+
 class ProductList(generics.ListCreateAPIView):
-    queryset = Product.objects.all()
-    serializer_class = ProductSerializer
+    queryset=Product.objects.all()
+    serializer_class=ProductSerializer
 
 class LessonList(generics.ListCreateAPIView):
-    queryset = Lesson.objects.all()
-    serializer_class = LessonSerializer
+    queryset=Lesson.objects.all()
+    serializer_class=LessonSerializer
 
 class ProductAccessList(generics.ListCreateAPIView):
-    queryset = ProductAccess.objects.all()
-    serializer_class = ProductAccessSerializer
+    queryset=ProductAccess.objects.all()
+    serializer_class=ProductAccessSerializer
 
 class LessonViewList(generics.ListCreateAPIView):
     queryset = LessonView.objects.all()
@@ -76,7 +124,7 @@ class LessonViewList(generics.ListCreateAPIView):
 
 
 def index_view(request):
-    current_user = request.user
+    current_user=request.user
     # Теперь переменная current_user содержит информацию о текущем пользователе
     return render(request, 'index.html', {'current_user': current_user})
 
