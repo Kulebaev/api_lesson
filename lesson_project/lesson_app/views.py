@@ -115,7 +115,7 @@ class ProductLessonListView(generics.ListAPIView):
 
         unique_lessons=queryset.distinct() # Только уникальные поля
 
-        serialized_data = self.serializer_class(unique_lessons, many=True).data
+        serialized_data=self.serializer_class(unique_lessons, many=True).data
 
         return Response(serialized_data)
         product_list=[]
@@ -153,8 +153,8 @@ class ProductStatisticsView(generics.ListAPIView):
     serializer_class=ProductAllSerializer
 
     def get_queryset(self):
-        products = Product.objects.all()
-        total_users = User.objects.count()
+        products=Product.objects.all()
+        total_users=User.objects.count()
 
         products = Product.objects.annotate(
             lesson_views=Count('lesson__lessonview', filter=F('lesson__lessonview__viewed')),
@@ -163,8 +163,8 @@ class ProductStatisticsView(generics.ListAPIView):
             total_users=Value(total_users)
         ).annotate(
             purchase_percentage=ExpressionWrapper(
-                (Count('productaccess__user', distinct=True) * 100 / F('total_users')) ,
-                output_field=FloatField()
+                (Count('productaccess__user', distinct=True)*100/F('total_users')) ,
+                output_field=IntegerField()
             )
         )
 
@@ -172,9 +172,9 @@ class ProductStatisticsView(generics.ListAPIView):
 
 
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
+        queryset=self.get_queryset()
 
-        serialized_data = self.serializer_class(queryset, many=True).data
+        serialized_data=self.serializer_class(queryset, many=True).data
 
         return Response(serialized_data)
 
@@ -210,8 +210,8 @@ class ProductAccessList(generics.ListCreateAPIView):
     serializer_class=ProductAccessSerializer
 
 class LessonViewList(generics.ListCreateAPIView):
-    queryset = LessonView.objects.all()
-    serializer_class = LessonViewSerializer
+    queryset=LessonView.objects.all()
+    serializer_class=LessonViewSerializer
 
 
 def index_view(request):
