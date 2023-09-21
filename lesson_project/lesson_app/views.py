@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Case, When, Value, IntegerField, F, Sum, Count, FloatField, ExpressionWrapper
+from django.db.models import Case, When, Value, IntegerField, F, Sum, Count, ExpressionWrapper
 from django.contrib.auth.models import User
 from django.db.models.functions import TruncDate, Coalesce
 from rest_framework.response import Response
@@ -54,25 +54,6 @@ class UserLessonListView(generics.ListAPIView):
         serialized_data = self.serializer_class(unique_lessons, many=True).data
 
         return Response(serialized_data)
-        # Список уроков
-        lesson_list = []
-        for lesson_data in unique_lessons:
-
-            # Рассчитать процент
-            if lesson_data.duration_seconds > 0:
-                viewing_percentage = (lesson_data.total_viewing_time / lesson_data.duration_seconds) * 100
-            else:
-                viewing_percentage = 0
-
-            lesson_info = {'lesson_name': lesson_data.name,
-                        'status': 'Просмотрено' if viewing_percentage >= 80 else 'Не просмотрено',
-                        'viewing_time': lesson_data.total_viewing_time,
-                    }
-            
-            lesson_list.append(lesson_info)
-        
-        
-        return Response(lesson_list)  # данные в формате json
 
 
 class ProductLessonSerializer(serializers.Serializer):
@@ -118,26 +99,6 @@ class ProductLessonListView(generics.ListAPIView):
         serialized_data=self.serializer_class(unique_lessons, many=True).data
 
         return Response(serialized_data)
-        product_list=[]
-
-        for lesson in unique_lessons:
-
-            # Проверить, был ли просмотр и получить дату последнего просмотра
-            last_viewed_date = None
-            
-            if lesson.timestamp is not None:
-                last_viewed_date = lesson.timestamp.strftime("%Y-%m-%d")
-
-
-            product_info = {
-                'lesson_name': lesson.name,
-                'viewing_time': lesson.total_viewing_time,
-                'last_viewed_date': last_viewed_date
-            }
-
-            product_list.append(product_info)
-
-        return Response(product_list)
 
 
 class ProductAllSerializer(serializers.Serializer):
@@ -178,24 +139,6 @@ class ProductStatisticsView(generics.ListAPIView):
 
         return Response(serialized_data)
 
-        serialized_data = [
-            {
-                'product_id': product.id,
-                'product_name': product.name,
-                'lesson_views': product.lesson_views,
-                'total_viewing_time_seconds': product.total_viewing_time,
-                'num_students': product.num_students,
-                'purchase_percentage': product.purchase_percentage,
-            }
-            for product in queryset
-        ]
-
-        return Response(serialized_data)
-
-
-
-
-
 
 class ProductList(generics.ListCreateAPIView):
     queryset=Product.objects.all()
@@ -216,6 +159,6 @@ class LessonViewList(generics.ListCreateAPIView):
 
 def index_view(request):
     current_user=request.user
-    # Теперь переменная current_user содержит информацию о текущем пользователе
+    
     return render(request, 'index.html', {'current_user': current_user})
 
