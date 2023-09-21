@@ -1,6 +1,8 @@
 from django.shortcuts import render
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Case, When, Value, BooleanField, IntegerField, F
+from django.db.models import Case, When, Value, IntegerField, F, Sum, Count
+from django.contrib.auth.models import User
+from django.db.models.functions import TruncDate
 from rest_framework.response import Response
 from .models import Product, Lesson, ProductAccess, LessonView
 from .serializers import ProductSerializer, LessonSerializer, ProductAccessSerializer, LessonViewSerializer
@@ -29,21 +31,17 @@ class UserLessonListView(generics.ListAPIView):
                 total_viewing_time=Case(
                     When(
                         lessonview__user=user, then=F('lessonview__viewing_time_seconds')
-                        ), default=Value(0), output_field=IntegerField()
-                )
-            )
-
-        lesson_with_view = lesson_with_view.annotate(
-                    percent=Case(
-                        When(total_viewing_time__gt=0,
-                             duration_seconds__gt=0,
-                             then=F('total_viewing_time') * 100 / F('duration_seconds'),
-                    ),default=Value(0),output_field=IntegerField()),
-                     status=Case(
+                        ), default=Value(0), output_field=IntegerField()),
+                percent=Case(
+                    When(total_viewing_time__gt=0,
+                        duration_seconds__gt=0,
+                        then=F('total_viewing_time') * 100 / F('duration_seconds'),
+                        ),default=Value(0),output_field=IntegerField()),
+                status=Case(
                         When(percent__gte=80,
-                             then=Value('Просмотренно'),
-                    ),default=Value('Не просмотренно')),
-                    )
+                        then=Value('Просмотренно'),
+                        ),default=Value('Не просмотренно')),
+        )
 
         return lesson_with_view
 
@@ -77,8 +75,15 @@ class UserLessonListView(generics.ListAPIView):
         return Response(lesson_list)  # данные в формате json
 
 
+class ProductLessonSerializer(serializers.Serializer):
+    name=serializers.CharField()
+    total_viewing_time=serializers.IntegerField()
+    timestamp_formatted=serializers.CharField()
+
+
 class ProductLessonListView(generics.ListAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes=[IsAuthenticated]
+    serializer_class=ProductLessonSerializer
 
     def get_queryset(self):
         # Получить идентификатор продукта из параметров запроса
@@ -96,7 +101,10 @@ class ProductLessonListView(generics.ListAPIView):
                 total_viewing_time=Case(
                     When(lessonview__user=user, 
                          then=F('lessonview__viewing_time_seconds')), default=Value(0), output_field=IntegerField()
-                )
+                ),
+                timestamp_formatted=TruncDate(
+                    F('lessonview__timestamp'),  # Форматируем дату
+                    )
             )
 
         return lesson_with_view
@@ -106,7 +114,10 @@ class ProductLessonListView(generics.ListAPIView):
         queryset=self.filter_queryset(self.get_queryset())
 
         unique_lessons=queryset.distinct() # Только уникальные поля
-        
+
+        serialized_data = self.serializer_class(unique_lessons, many=True).data
+
+        return Response(serialized_data)
         product_list=[]
 
         for lesson in unique_lessons:
@@ -129,6 +140,66 @@ class ProductLessonListView(generics.ListAPIView):
         return Response(product_list)
 
 
+class ProductAllSerializer(serializers.Serializer):
+    id=serializers.IntegerField()
+    name=serializers.CharField()
+    lesson_views=serializers.IntegerField()
+    total_viewing_time=serializers.IntegerField()
+    num_students=serializers.IntegerField()
+    purchase_percentage=serializers.IntegerField()
+
+
+class ProductStatisticsView(generics.ListAPIView):
+    serializer_class=ProductAllSerializer
+
+    def get_queryset(self):
+        products = Product.objects.all()
+        total_users = User.objects.count()
+
+        for product in products:
+            # Количество просмотренных уроков от всех учеников
+            product.lesson_views = LessonView.objects.filter(
+                lesson__products=product,
+                viewed=True
+            ).count()
+
+            # Суммарное время просмотра роликов всех учеников
+            product.total_viewing_time = LessonView.objects.filter(
+                lesson__products=product
+            ).aggregate(total_time=Sum('viewing_time_seconds'))['total_time'] or 0
+
+            # Количество учеников, занимающихся на продукте
+            product.num_students = ProductAccess.objects.filter(
+                product=product
+            ).aggregate(num_students=Count('user', distinct=True))['num_students'] or 0
+
+            # Процент приобретения продукта
+            product.purchase_percentage = (
+                ProductAccess.objects.filter(product=product).count() / total_users
+            ) * 100 if total_users > 0 else 0
+
+        return products
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+
+        serialized_data = self.serializer_class(queryset, many=True).data
+
+        return Response(serialized_data)
+
+        serialized_data = [
+            {
+                'product_id': product.id,
+                'product_name': product.name,
+                'lesson_views': product.lesson_views,
+                'total_viewing_time_seconds': product.total_viewing_time,
+                'num_students': product.num_students,
+                'purchase_percentage': product.purchase_percentage,
+            }
+            for product in queryset
+        ]
+
+        return Response(serialized_data)
 
 
 

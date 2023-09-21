@@ -10,4 +10,5 @@ urlpatterns = [
     path('user-lessons/', views.UserLessonListView.as_view(), name='user-lesson-list'),
     path('lesson-views/', views.LessonViewList.as_view(), name='lesson-view-list'),
     path('api/product-lessons/<int:product_id>/', views.ProductLessonListView.as_view(), name='product-lesson-list'),
+    path('api/product-all/', views.ProductStatisticsView.as_view(), name='product-all'),
 ]
