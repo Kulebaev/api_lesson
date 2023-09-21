@@ -1,15 +1,22 @@
 from django.shortcuts import render
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Case, When, Value, BooleanField, IntegerField, DateField, F
+from django.db.models import Case, When, Value, BooleanField, IntegerField, F
 from rest_framework.response import Response
 from .models import Product, Lesson, ProductAccess, LessonView
 from .serializers import ProductSerializer, LessonSerializer, ProductAccessSerializer, LessonViewSerializer
-from rest_framework import generics
-from datetime import datetime
+from rest_framework import generics, serializers
+
+
+class LessonSerializer(serializers.Serializer):
+    name=serializers.CharField()
+    total_viewing_time=serializers.IntegerField()
+    status=serializers.CharField()
+    duration_seconds=serializers.IntegerField()
 
 
 class UserLessonListView(generics.ListAPIView):
     permission_classes=[IsAuthenticated]
+    serializer_class=LessonSerializer
 
     def get_queryset(self):
         # текущий пользователь
@@ -19,12 +26,24 @@ class UserLessonListView(generics.ListAPIView):
         
         lesson_with_view=Lesson.objects.filter(
             products__in=product_access).annotate(
-                viewed=Case(
-                    When(lessonview__user=user, then=F('lessonview__viewed')), default=Value(0), output_field=BooleanField()),
                 total_viewing_time=Case(
-                    When(lessonview__user=user, then=F('lessonview__viewing_time_seconds')), default=Value(0), output_field=IntegerField()
+                    When(
+                        lessonview__user=user, then=F('lessonview__viewing_time_seconds')
+                        ), default=Value(0), output_field=IntegerField()
                 )
             )
+
+        lesson_with_view = lesson_with_view.annotate(
+                    percent=Case(
+                        When(total_viewing_time__gt=0,
+                             duration_seconds__gt=0,
+                             then=F('total_viewing_time') * 100 / F('duration_seconds'),
+                    ),default=Value(0),output_field=IntegerField()),
+                     status=Case(
+                        When(percent__gte=80,
+                             then=Value('Просмотренно'),
+                    ),default=Value('Не просмотренно')),
+                    )
 
         return lesson_with_view
 
@@ -33,7 +52,10 @@ class UserLessonListView(generics.ListAPIView):
         queryset=self.filter_queryset(self.get_queryset())
 
         unique_lessons=queryset.distinct() # Только уникальные поля
-    
+        
+        serialized_data = self.serializer_class(unique_lessons, many=True).data
+
+        return Response(serialized_data)
         # Список уроков
         lesson_list = []
         for lesson_data in unique_lessons:
@@ -50,7 +72,8 @@ class UserLessonListView(generics.ListAPIView):
                     }
             
             lesson_list.append(lesson_info)
-
+        
+        
         return Response(lesson_list)  # данные в формате json
 
 
@@ -58,7 +81,7 @@ class ProductLessonListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        # Получить идентификатор продукта из параметров запроса (предположим, что он передается как product_id)
+        # Получить идентификатор продукта из параметров запроса
         product_id=self.kwargs.get('product_id')
         product_object=Product.objects.filter(id=product_id)
         # Получить текущего пользователя
@@ -104,6 +127,12 @@ class ProductLessonListView(generics.ListAPIView):
             product_list.append(product_info)
 
         return Response(product_list)
+
+
+
+
+
+
 
 
 class ProductList(generics.ListCreateAPIView):
