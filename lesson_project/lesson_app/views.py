@@ -1,8 +1,8 @@
 from django.shortcuts import render
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Case, When, Value, IntegerField, F, Sum, Count
+from django.db.models import Case, When, Value, IntegerField, F, Sum, Count, FloatField, ExpressionWrapper
 from django.contrib.auth.models import User
-from django.db.models.functions import TruncDate
+from django.db.models.functions import TruncDate, Coalesce
 from rest_framework.response import Response
 from .models import Product, Lesson, ProductAccess, LessonView
 from .serializers import ProductSerializer, LessonSerializer, ProductAccessSerializer, LessonViewSerializer
@@ -156,29 +156,20 @@ class ProductStatisticsView(generics.ListAPIView):
         products = Product.objects.all()
         total_users = User.objects.count()
 
-        for product in products:
-            # Количество просмотренных уроков от всех учеников
-            product.lesson_views = LessonView.objects.filter(
-                lesson__products=product,
-                viewed=True
-            ).count()
-
-            # Суммарное время просмотра роликов всех учеников
-            product.total_viewing_time = LessonView.objects.filter(
-                lesson__products=product
-            ).aggregate(total_time=Sum('viewing_time_seconds'))['total_time'] or 0
-
-            # Количество учеников, занимающихся на продукте
-            product.num_students = ProductAccess.objects.filter(
-                product=product
-            ).aggregate(num_students=Count('user', distinct=True))['num_students'] or 0
-
-            # Процент приобретения продукта
-            product.purchase_percentage = (
-                ProductAccess.objects.filter(product=product).count() / total_users
-            ) * 100 if total_users > 0 else 0
+        products = Product.objects.annotate(
+            lesson_views=Count('lesson__lessonview', filter=F('lesson__lessonview__viewed')),
+            total_viewing_time=Coalesce(Sum('lesson__lessonview__viewing_time_seconds'), 0),
+            num_students=Count('productaccess__user', distinct=True),
+            total_users=Value(total_users)
+        ).annotate(
+            purchase_percentage=ExpressionWrapper(
+                (Count('productaccess__user', distinct=True) * 100 / F('total_users')) ,
+                output_field=FloatField()
+            )
+        )
 
         return products
+
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
